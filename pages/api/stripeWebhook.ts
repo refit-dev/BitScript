@@ -1,6 +1,21 @@
 import { NextApiRequest, NextApiResponse } from "next";
 import jwt from "jsonwebtoken";
 
+// The old Price object's ID when present (old-version payloads), otherwise the price at
+// pricing.price_details: an ID, or a Price when expanded.
+function getInvoicePriceId(line: object): string | undefined {
+  const legacy: unknown = Reflect.get(line, 'price');
+  const pricing: unknown = legacy === undefined ? Reflect.get(line, 'pricing') : undefined;
+  const details: unknown =
+    pricing && typeof pricing === 'object' && Reflect.get(pricing, 'type') === 'price_details'
+      ? Reflect.get(pricing, 'price_details')
+      : undefined;
+  const price: unknown =
+    legacy !== undefined ? legacy : details && typeof details === 'object' ? Reflect.get(details, 'price') : undefined;
+  const id: unknown = price && typeof price === 'object' ? Reflect.get(price, 'id') : price;
+  return typeof id === 'string' ? id : undefined;
+}
+
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 import { AccountTier, PaymentLength } from "@prisma/client";
 import { getProductList } from "@server/routers/payment";
@@ -128,7 +143,7 @@ export default async function handler(
           return res.status(400).end();
         }
         const customerId = event.data.object.customer;
-        const productId = invoice.lines.data[0].price.id;
+        const productId = (getInvoicePriceId(invoice.lines.data[0]));
         // check if the product id is a team product id or not
         const team = await prisma.team.findFirst({
           where: {
@@ -277,7 +292,7 @@ export default async function handler(
               return res.status(400).end();
             }
 
-            const productId = invoice.lines.data[0].price.id;
+            const productId = (getInvoicePriceId(invoice.lines.data[0]));
 
             let accountTier: AccountTier = AccountTier.BEGINNER_BOB;
             let paymentLength: PaymentLength = PaymentLength.ONE_DAY;
